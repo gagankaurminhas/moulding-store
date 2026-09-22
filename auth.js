@@ -20,21 +20,28 @@ function getMsalConfig() {
 }
 
 async function initAuth() {
-  if (!window.msal) throw new Error("Microsoft authentication library did not load.");
+  if (!window.msal) {
+    throw new Error("Microsoft authentication library did not load.");
+  }
+
   msalApp = new msal.PublicClientApplication(getMsalConfig());
 
   try {
+    // Important for redirect authentication.
     const redirectResult = await msalApp.handleRedirectPromise();
+
     if (redirectResult?.account) {
       currentAccount = redirectResult.account;
       msalApp.setActiveAccount(currentAccount);
     }
   } catch (error) {
-    console.error("Redirect handling error", error);
+    console.error("Redirect handling error:", error);
+    throw error;
   }
 
   const accounts = msalApp.getAllAccounts();
-  if (!currentAccount && accounts.length) {
+
+  if (!currentAccount && accounts.length > 0) {
     currentAccount = accounts[0];
     msalApp.setActiveAccount(currentAccount);
   }
@@ -42,35 +49,71 @@ async function initAuth() {
   return currentAccount;
 }
 
-async function signIn() {
-  if (!msalApp) await initAuth();
 
-  const result = await msalApp.loginPopup({
+/* ---------------------------------------------------------
+   MICROSOFT LOGIN
+   Uses full-page redirect instead of popup.
+--------------------------------------------------------- */
+
+async function signIn() {
+  if (!msalApp) {
+    await initAuth();
+  }
+
+  await msalApp.loginRedirect({
     scopes: APP_CONFIG.scopes,
     prompt: "select_account"
   });
-
-  currentAccount = result.account;
-  msalApp.setActiveAccount(currentAccount);
-  return currentAccount;
 }
 
+
+/* ---------------------------------------------------------
+   SIGN OUT
+--------------------------------------------------------- */
+
 async function signOut() {
-  if (!msalApp) return;
-  const account = currentAccount || msalApp.getActiveAccount();
+  if (!msalApp) {
+    await initAuth();
+  }
+
+  const account =
+    currentAccount ||
+    msalApp.getActiveAccount() ||
+    msalApp.getAllAccounts()[0];
+
   currentAccount = null;
-  await msalApp.logoutPopup({
+
+  await msalApp.logoutRedirect({
     account,
-    mainWindowRedirectUri: APP_CONFIG.redirectUri
+    postLogoutRedirectUri: APP_CONFIG.redirectUri
   });
 }
 
-async function getAccessToken() {
-  if (!msalApp) await initAuth();
 
-  currentAccount = currentAccount || msalApp.getActiveAccount() || msalApp.getAllAccounts()[0];
+/* ---------------------------------------------------------
+   GET GRAPH ACCESS TOKEN
+   First try silent authentication.
+   If Microsoft requires interaction, use redirect instead
+   of opening a popup.
+--------------------------------------------------------- */
+
+async function getAccessToken() {
+  if (!msalApp) {
+    await initAuth();
+  }
+
+  currentAccount =
+    currentAccount ||
+    msalApp.getActiveAccount() ||
+    msalApp.getAllAccounts()[0];
+
   if (!currentAccount) {
-    throw new Error("Please sign in with your Microsoft 365 account first.");
+    await msalApp.loginRedirect({
+      scopes: APP_CONFIG.scopes,
+      prompt: "select_account"
+    });
+
+    throw new Error("Redirecting to Microsoft sign-in...");
   }
 
   msalApp.setActiveAccount(currentAccount);
@@ -80,17 +123,31 @@ async function getAccessToken() {
       account: currentAccount,
       scopes: APP_CONFIG.scopes
     });
+
     return result.accessToken;
+
   } catch (silentError) {
-    console.warn("Silent token failed; opening Microsoft sign-in.", silentError);
-    const result = await msalApp.acquireTokenPopup({
+
+    console.warn(
+      "Silent token acquisition failed. Redirecting to Microsoft.",
+      silentError
+    );
+
+    await msalApp.acquireTokenRedirect({
       account: currentAccount,
       scopes: APP_CONFIG.scopes
     });
-    return result.accessToken;
+
+    throw new Error("Redirecting to Microsoft authentication...");
   }
 }
 
+
 function getAccount() {
-  return currentAccount || msalApp?.getActiveAccount() || msalApp?.getAllAccounts()?.[0] || null;
+  return (
+    currentAccount ||
+    msalApp?.getActiveAccount() ||
+    msalApp?.getAllAccounts()?.[0] ||
+    null
+  );
 }
