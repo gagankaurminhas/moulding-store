@@ -5,17 +5,16 @@ const APP_CONFIG = {
   workbookFileName: "MouldingStoreDatabase.xlsx",
   workbookDriveId: "",
   workbookItemId: "",
-  scopes: ["User.Read", "Files.ReadWrite"],
+  // Read-only: the website does not request Excel write permission.
+  scopes: ["User.Read", "Files.Read"],
   graphBaseUrl: "https://graph.microsoft.com/v1.0",
   tables: {
+    orders: "OrdersTable",
+    deliveryStatus: "DeliveryStatusTable",
     drivers: "DriversTable",
     trucks: "TrucksTable",
-    orders: "OrdersTable",
     schedules: "DailyScheduleTable",
-    routeStops: "RouteStopsTable",
-    deliveryStatus: "DeliveryStatusTable",
-    loading: "LoadingChecklistTable",
-    issues: "DeliveryIssuesTable"
+    routeStops: "RouteStopsTable"
   },
-  refreshSeconds: 15
+  refreshSeconds: 20
 };
