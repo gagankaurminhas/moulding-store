@@ -1,558 +1,196 @@
-const excelColumnCache = new Map();
-let workbookInfoCache = null;
-
-async function graphRequest(pathOrUrl, options = {}, retryCount = 0) {
-  const token = await getAccessToken();
-
-  const url = pathOrUrl.startsWith("http")
-    ? pathOrUrl
-    : `${APP_CONFIG.graphBaseUrl}${pathOrUrl}`;
-
-  const headers = new Headers(options.headers || {});
-  headers.set("Authorization", `Bearer ${token}`);
-
-  if (options.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-
-  const response = await fetch(url, {
-    ...options,
-    headers
-  });
-
-  const contentType = response.headers.get("content-type") || "";
-  const text = await response.text();
-
-  let data = null;
-
-  if (text) {
-    try {
-      data = contentType.includes("application/json")
-        ? JSON.parse(text)
-        : text;
-    } catch {
-      data = text;
-    }
-  }
-
-  if (!response.ok) {
-    if (
-      [429, 503, 504].includes(response.status) &&
-      retryCount < 2
-    ) {
-      const retryAfter =
-        Number(response.headers.get("Retry-After")) ||
-        (retryCount + 1) * 2;
-
-      await new Promise(resolve =>
-        setTimeout(resolve, retryAfter * 1000)
-      );
-
-      return graphRequest(pathOrUrl, options, retryCount + 1);
-    }
-
-    const graphMessage =
-      data?.error?.message ||
-      data?.error_description ||
-      `Microsoft Graph returned HTTP ${response.status}.`;
-
-    throw new Error(graphMessage);
-  }
-
-  return data;
-}
-
-
-/* =========================================================
-   WORKBOOK CONFIGURATION
-========================================================= */
-
-function workbookConfigured() {
-  return Boolean(
-    APP_CONFIG.workbookDriveId &&
-    APP_CONFIG.workbookItemId
-  );
-}
-
-
-function workbookBasePath() {
-  if (!workbookConfigured()) {
-    throw new Error(
-      "Workbook IDs are not configured yet."
-    );
-  }
-
-  return `/drives/${encodeURIComponent(
-    APP_CONFIG.workbookDriveId
-  )}/items/${encodeURIComponent(
-    APP_CONFIG.workbookItemId
-  )}/workbook`;
-}
-
-
-/* =========================================================
-   FIND WORKBOOK
-   Searches the signed-in user's OneDrive root.
-========================================================= */
-
-async function resolveOwnerWorkbook() {
-
-  const fileName =
-    APP_CONFIG.workbookFileName;
-
-  if (!fileName) {
-    throw new Error(
-      "Workbook filename is not configured."
-    );
-  }
-
-
-  /* -----------------------------------------------
-     Method 1:
-     Direct path lookup.
-  ------------------------------------------------ */
-
-  try {
-
-    const path =
-      `/me/drive/root:/${encodeURIComponent(fileName)}`;
-
-    const info =
-      await graphRequest(path);
-
-    const driveId =
-      info?.parentReference?.driveId;
-
-    const itemId =
-      info?.id;
-
-    if (driveId && itemId) {
-
-      workbookInfoCache = {
-        driveId,
-        itemId,
-        name: info.name,
-        webUrl: info.webUrl || ""
-      };
-
-      return workbookInfoCache;
-    }
-
-  } catch (error) {
-
-    console.warn(
-      "Direct workbook path lookup failed:",
-      error
-    );
-
-  }
-
-
-  /* -----------------------------------------------
-     Method 2:
-     Search files in OneDrive root.
-  ------------------------------------------------ */
-
-  const childrenUrl =
-    `/me/drive/root/children?$select=id,name,webUrl,parentReference,file,folder&$top=200`;
-
-  const children =
-    await graphRequest(childrenUrl);
-
-
-  const files =
-    Array.isArray(children?.value)
-      ? children.value
-      : [];
-
-
-  const match =
-    files.find(
-      item =>
-        String(item.name || "").toLowerCase() ===
-        String(fileName).toLowerCase() &&
-        item.file
-    );
-
-
-  if (!match) {
-
-    throw new Error(
-      `Microsoft Graph could not find "${fileName}" in the signed-in user's OneDrive root. ` +
-      `Make sure the workbook is directly under OneDrive → My files and that this Microsoft account has access to it.`
-    );
-
-  }
-
-
-  const driveId =
-    match?.parentReference?.driveId;
-
-  const itemId =
-    match?.id;
-
-
-  if (!driveId || !itemId) {
-
-    throw new Error(
-      "The workbook was found, but Microsoft Graph did not return the file IDs."
-    );
-
-  }
-
-
-  workbookInfoCache = {
-
-    driveId,
-    itemId,
-    name: match.name,
-    webUrl: match.webUrl || ""
-
+const ExcelAPI = (() => {
+  const keys = {
+    drive: "mouldingWorkbookDriveId",
+    item: "mouldingWorkbookItemId"
   };
 
-
-  return workbookInfoCache;
-}
-
-
-/* =========================================================
-   GET WORKBOOK INFORMATION
-========================================================= */
-
-async function getWorkbookInfo() {
-
-  if (workbookInfoCache) {
-    return workbookInfoCache;
+  function ids() {
+    return {
+      driveId: localStorage.getItem(keys.drive) || APP_CONFIG.workbookDriveId,
+      itemId: localStorage.getItem(keys.item) || APP_CONFIG.workbookItemId
+    };
   }
 
-  if (!workbookConfigured()) {
-
-    return null;
-
-  }
-
-  const path =
-    `/drives/${encodeURIComponent(
-      APP_CONFIG.workbookDriveId
-    )}/items/${encodeURIComponent(
-      APP_CONFIG.workbookItemId
-    )}?$select=id,name,webUrl,parentReference,file`;
-
-  const info =
-    await graphRequest(path);
-
-
-  workbookInfoCache = {
-
-    driveId:
-      APP_CONFIG.workbookDriveId,
-
-    itemId:
-      APP_CONFIG.workbookItemId,
-
-    name:
-      info.name,
-
-    webUrl:
-      info.webUrl || ""
-
-  };
-
-
-  return workbookInfoCache;
-}
-
-
-/* =========================================================
-   SAVE WORKBOOK IDS
-========================================================= */
-
-function setWorkbookIds(driveId, itemId) {
-
-  if (!driveId || !itemId) {
-
-    throw new Error(
-      "Both Drive ID and Item ID are required."
-    );
-
-  }
-
-
-  APP_CONFIG.workbookDriveId =
-    driveId;
-
-  APP_CONFIG.workbookItemId =
-    itemId;
-
-
-  workbookInfoCache = {
-
-    driveId,
-    itemId,
-    name: APP_CONFIG.workbookFileName,
-    webUrl: ""
-
-  };
-
-
-  try {
-
-    localStorage.setItem(
-      "mouldingWorkbookDriveId",
-      driveId
-    );
-
-    localStorage.setItem(
-      "mouldingWorkbookItemId",
-      itemId
-    );
-
-  } catch {}
-
-}
-
-
-/* =========================================================
-   TABLE HELPERS
-========================================================= */
-
-async function fetchAll(url) {
-
-  let next = url;
-
-  const all = [];
-
-
-  while (next) {
-
-    const data =
-      await graphRequest(next);
-
-    if (
-      Array.isArray(data?.value)
-    ) {
-
-      all.push(...data.value);
-
-    }
-
-    next =
-      data?.["@odata.nextLink"] ||
-      null;
-
-  }
-
-
-  return all;
-}
-
-
-async function getTableColumns(tableName) {
-
-  if (
-    excelColumnCache.has(tableName)
-  ) {
-
-    return excelColumnCache.get(
-      tableName
-    );
-
-  }
-
-
-  const table =
-    encodeURIComponent(tableName);
-
-
-  const url =
-    `${workbookBasePath()}/tables/${table}/columns?$select=id,name,index&$top=100`;
-
-
-  const columns =
-    await fetchAll(url);
-
-
-  columns.sort(
-    (a, b) =>
-      Number(a.index ?? 0) -
-      Number(b.index ?? 0)
-  );
-
-
-  const names =
-    columns.map(c => c.name);
-
-
-  excelColumnCache.set(
-    tableName,
-    names
-  );
-
-
-  return names;
-}
-
-
-async function getTableRows(tableName) {
-
-  const table =
-    encodeURIComponent(tableName);
-
-
-  const url =
-    `${workbookBasePath()}/tables/${table}/rows?$top=5000`;
-
-
-  const rows =
-    await fetchAll(url);
-
-
-  const columns =
-    await getTableColumns(
-      tableName
-    );
-
-
-  return rows.map(row => {
-
-    const values =
-      row?.values?.[0] || [];
-
-    const object = {};
-
-    columns.forEach(
-      (column, index) => {
-
-        object[column] =
-          values[index] ?? "";
-
+  async function request(path, options = {}) {
+    const token = await getAccessToken();
+    const res = await fetch(APP_CONFIG.graphBaseUrl + path, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
       }
-    );
-
-    object.__rowIndex =
-      Number(row.index ?? 0);
-
-    return object;
-
-  });
-
-}
-
-
-async function addTableRow(
-  tableName,
-  rowObject
-) {
-
-  const columns =
-    await getTableColumns(
-      tableName
-    );
-
-
-  const values = [
-
-    columns.map(
-      column =>
-        rowObject[column] ?? ""
-    )
-
-  ];
-
-
-  const table =
-    encodeURIComponent(
-      tableName
-    );
-
-
-  return graphRequest(
-    `${workbookBasePath()}/tables/${table}/rows/add`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        index: null,
-        values
-      })
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`${res.status}: ${body || res.statusText}`);
     }
-  );
-
-}
-
-
-async function updateTableRow(
-  tableName,
-  rowIndex,
-  rowObject
-) {
-
-  const columns =
-    await getTableColumns(
-      tableName
-    );
-
-
-  const values = [
-
-    columns.map(
-      column =>
-        rowObject[column] ?? ""
-    )
-
-  ];
-
-
-  const table =
-    encodeURIComponent(
-      tableName
-    );
-
-
-  return graphRequest(
-    `${workbookBasePath()}/tables/${table}/rows/${encodeURIComponent(rowIndex)}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        values
-      })
-    }
-  );
-
-}
-
-
-/* =========================================================
-   TEST CONNECTION
-========================================================= */
-
-async function testWorkbookConnection() {
-
-  if (!workbookConfigured()) {
-
-    throw new Error(
-      "Workbook Drive ID and Item ID are not configured yet."
-    );
-
+    if (res.status === 204) return null;
+    return res.json();
   }
 
+  function base() {
+    const {driveId, itemId} = ids();
+    if (!driveId || !itemId) {
+      throw new Error("Workbook is not connected. Open Settings and use Find My Workbook.");
+    }
+    return `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook`;
+  }
 
-  const info =
-    await getWorkbookInfo();
+  async function allPages(path) {
+    let url = path;
+    const out = [];
+    while (url) {
+      const data = await request(url);
+      if (Array.isArray(data.value)) out.push(...data.value);
+      url = data["@odata.nextLink"]
+        ? data["@odata.nextLink"].replace(APP_CONFIG.graphBaseUrl, "")
+        : null;
+    }
+    return out;
+  }
 
+  async function rows(tableName) {
+    const list = await allPages(`${base()}/tables/${encodeURIComponent(tableName)}/rows`);
+    return list.map(x => x.values?.[0] || []);
+  }
 
-  const tables =
-    await fetchAll(
-      `${workbookBasePath()}/tables?$select=id,name&$top=100`
+  async function headers(tableName) {
+    const data = await request(`${base()}/tables/${encodeURIComponent(tableName)}/range`);
+    return (data.values?.[0] || []).map(String);
+  }
+
+  function objects(header, rowValues) {
+    return rowValues.map(row => {
+      const o = {};
+      header.forEach((h, i) => o[h] = row[i] ?? "");
+      return o;
+    });
+  }
+
+  async function tableObjects(tableName) {
+    const [h, r] = await Promise.all([headers(tableName), rows(tableName)]);
+    return objects(h, r);
+  }
+
+  async function addRow(tableName, obj) {
+    const h = await headers(tableName);
+    const row = h.map(k => obj[k] ?? "");
+    return request(`${base()}/tables/${encodeURIComponent(tableName)}/rows/add`, {
+      method: "POST",
+      body: JSON.stringify({values: [row]})
+    });
+  }
+
+  async function updateRow(tableName, index, obj) {
+    const h = await headers(tableName);
+    const row = h.map(k => obj[k] ?? "");
+    return request(
+      `${base()}/tables/${encodeURIComponent(tableName)}/rows/${index}`,
+      {method: "PATCH", body: JSON.stringify({values: [row])}
     );
+  }
 
+  async function findWorkbook() {
+    const token = await getAccessToken();
+    const res = await fetch(
+      `${APP_CONFIG.graphBaseUrl}/me/drive/root/search(q='${encodeURIComponent(APP_CONFIG.workbookFileName)}')`,
+      {headers: {Authorization: `Bearer ${token}`}}
+    );
+    if (!res.ok) throw new Error("Could not search OneDrive.");
+    const data = await res.json();
+    const item = (data.value || []).find(x => x.name === APP_CONFIG.workbookFileName);
+    if (!item) throw new Error(`Could not find ${APP_CONFIG.workbookFileName} in OneDrive.`);
+    const driveId = item.parentReference?.driveId;
+    const itemId = item.id;
+    if (!driveId || !itemId) throw new Error("Workbook was found but its OneDrive IDs were unavailable.");
+    localStorage.setItem(keys.drive, driveId);
+    localStorage.setItem(keys.item, itemId);
+    return {driveId, itemId};
+  }
+
+  async function load() {
+    const names = APP_CONFIG.tables;
+    const [
+      drivers, trucks, orders, schedules, routeStops, deliveryStatus, loading, issues
+    ] = await Promise.all([
+      tableObjects(names.drivers),
+      tableObjects(names.trucks),
+      tableObjects(names.orders),
+      tableObjects(names.schedules),
+      tableObjects(names.routeStops),
+      tableObjects(names.deliveryStatus),
+      tableObjects(names.loading),
+      tableObjects(names.issues)
+    ]);
+    return {drivers, trucks, orders, schedules, routeStops, deliveryStatus, loading, issues};
+  }
+
+  async function addOrder(order) {
+    return addRow(APP_CONFIG.tables.orders, order);
+  }
+
+  async function addSchedule(schedule) {
+    return addRow(APP_CONFIG.tables.schedules, schedule);
+  }
+
+  async function addStop(stop) {
+    return addRow(APP_CONFIG.tables.routeStops, stop);
+  }
+
+  async function updateOrderById(orderId, patch) {
+    const h = await headers(APP_CONFIG.tables.orders);
+    const r = await rows(APP_CONFIG.tables.orders);
+    const idIndex = h.indexOf("OrderID");
+    if (idIndex < 0) throw new Error("OrdersTable is missing OrderID.");
+    const idx = r.findIndex(x => String(x[idIndex]) === String(orderId));
+    if (idx < 0) throw new Error("Order not found.");
+    const current = {};
+    h.forEach((k, i) => current[k] = r[idx][i] ?? "");
+    Object.assign(current, patch);
+    return updateRow(APP_CONFIG.tables.orders, idx, current);
+  }
+
+  async function updateScheduleById(scheduleId, patch) {
+    const h = await headers(APP_CONFIG.tables.schedules);
+    const r = await rows(APP_CONFIG.tables.schedules);
+    const idIndex = h.indexOf("ScheduleID");
+    if (idIndex < 0) throw new Error("DailyScheduleTable is missing ScheduleID.");
+    const idx = r.findIndex(x => String(x[idIndex]) === String(scheduleId));
+    if (idx < 0) throw new Error("Schedule not found.");
+    const current = {};
+    h.forEach((k, i) => current[k] = r[idx][i] ?? "");
+    Object.assign(current, patch);
+    return updateRow(APP_CONFIG.tables.schedules, idx, current);
+  }
+
+  async function updateStopById(stopId, patch) {
+    const h = await headers(APP_CONFIG.tables.routeStops);
+    const r = await rows(APP_CONFIG.tables.routeStops);
+    const idIndex = h.indexOf("StopID");
+    if (idIndex < 0) throw new Error("RouteStopsTable is missing StopID.");
+    const idx = r.findIndex(x => String(x[idIndex]) === String(stopId));
+    if (idx < 0) throw new Error("Stop not found.");
+    const current = {};
+    h.forEach((k, i) => current[k] = r[idx][i] ?? "");
+    Object.assign(current, patch);
+    return updateRow(APP_CONFIG.tables.routeStops, idx, current);
+  }
+
+  async function setStatus(status) {
+    const s = {
+      StatusID: `DS-${Date.now()}`,
+      ...status
+    };
+    return addRow(APP_CONFIG.tables.deliveryStatus, s);
+  }
+
+  async function findAndSaveWorkbook() {
+    return findWorkbook();
+  }
 
   return {
-
-    info,
-
-    tables:
-      tables.map(t => t.name)
-
+    load, addOrder, addSchedule, addStop, updateOrderById,
+    updateScheduleById, updateStopById, setStatus, findAndSaveWorkbook
   };
-
-}
+})();

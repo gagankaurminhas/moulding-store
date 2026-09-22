@@ -1,104 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Moulding Store | Delivery Management</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <title>Moulding Store — Live Dispatch</title>
   <link rel="stylesheet" href="styles.css">
-  <script defer src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
-  <script defer src="config.js"></script>
-  <script defer src="auth.js"></script>
-  <script defer src="excel-api.js"></script>
-  <script defer src="app.js"></script>
 </head>
 <body>
+  <div id="app"></div>
 
-<div id="loginScreen" class="login-screen">
-  <div class="login-box">
-    <div class="login-logo">MS</div>
-    <div class="login-title">Moulding Store</div>
-    <div class="login-text">Delivery management system<br>Sign in with your Microsoft 365 business account.</div>
-    <button class="btn btn-primary" style="width:100%;height:44px" onclick="handleLogin()">Sign in with Microsoft 365</button>
-    <div class="login-help">Only accounts allowed by your Microsoft 365 organization can access the system.</div>
-  </div>
-</div>
-
-<div class="app" id="appShell" style="display:none">
-  <aside class="sidebar" id="sidebar">
-    <div class="brand"><div class="brand-mark">MS</div><div><div class="brand-name">Moulding Store</div><div class="brand-sub">Delivery Management</div></div></div>
-    <div class="section-label">Operations</div>
-    <div class="nav-item active" data-page="dashboard"><span class="nav-icon">▦</span>Dashboard</div>
-    <div class="nav-item" data-page="orders"><span class="nav-icon">📦</span>Orders</div>
-    <div class="nav-item" data-page="backorders"><span class="nav-icon">⚠</span>Backorders</div>
-    <div class="nav-item" data-page="purchasing"><span class="nav-icon">🛒</span>Purchasing / PO</div>
-    <div class="nav-item" data-page="receiving"><span class="nav-icon">📥</span>Receiving</div>
-    <div class="section-label">Delivery</div>
-    <div class="nav-item" data-page="schedule"><span class="nav-icon">🚚</span>Delivery Schedule</div>
-    <div class="nav-item" data-page="drivers"><span class="nav-icon">👤</span>Drivers & Trucks</div>
-    <div class="nav-item" data-page="routes"><span class="nav-icon">🗺</span>Routes</div>
-    <div class="section-label">Management</div>
-    <div class="nav-item" data-page="issues"><span class="nav-icon">⚠️</span>Delivery Issues</div>
-    <div class="nav-item" data-page="settings"><span class="nav-icon">⚙</span>Settings</div>
-    <div class="side-bottom"><div class="nav-item" onclick="handleLogout()"><span class="nav-icon">↪</span>Sign out</div></div>
-  </aside>
-
-  <main class="main">
-    <header class="topbar">
-      <div style="display:flex;align-items:center">
-        <button class="icon-btn mobile-menu" onclick="toggleSidebar()">☰</button>
-        <div><div class="title" id="pageTitle">Dashboard</div><div class="subtitle" id="pageSubtitle">Today's delivery operations</div></div>
-      </div>
-      <div class="top-right">
-        <button class="icon-btn" onclick="refreshCurrentPage()">↻</button>
-        <div class="user"><div class="avatar" id="avatar">MS</div><div class="user-meta"><div class="user-name" id="userName">—</div><div class="user-mail" id="userMail">—</div></div></div>
-      </div>
-    </header>
-
-    <div class="content">
-      <section id="page-dashboard" class="page active">
-        <div id="dashboardAlert"></div>
-        <div class="grid stats" id="statsGrid">
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Orders Ready</span><span class="stat-icon blue">✓</span></div><div class="stat-value" id="mReady">—</div><div class="stat-note">Ready for scheduling</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Scheduled</span><span class="stat-icon green">🚚</span></div><div class="stat-value" id="mScheduled">—</div><div class="stat-note">Delivery status scheduled</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Backorders</span><span class="stat-icon red">!</span></div><div class="stat-value" id="mBackorders">—</div><div class="stat-note">Not yet delivered</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">PO Required</span><span class="stat-icon orange">🛒</span></div><div class="stat-value" id="mPORequired">—</div><div class="stat-note">Purchasing action needed</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">PO Ordered</span><span class="stat-icon purple">📋</span></div><div class="stat-value" id="mPOOrdered">—</div><div class="stat-note">Awaiting supplier</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Awaiting Receiving</span><span class="stat-icon blue">📥</span></div><div class="stat-value" id="mReceiving">—</div><div class="stat-note">Expected or partial</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Awaiting Shipper</span><span class="stat-icon orange">📦</span></div><div class="stat-value" id="mShipper">—</div><div class="stat-note">Received but unreleased</div></div>
-          <div class="card stat"><div class="stat-top"><span class="stat-label">Workbook</span><span class="stat-icon green">☁</span></div><div class="stat-value" id="mWorkbook">—</div><div class="stat-note">Microsoft Graph connection</div></div>
-        </div>
-
-        <div class="grid grid-2">
-          <div class="card"><div class="panel-head"><div><div class="panel-title">Today's Routes</div><div class="panel-sub">Live schedule data from Excel</div></div><button class="btn btn-primary btn-small" onclick="navigate('schedule')">Open Schedule</button></div><div class="panel-body" id="routeSummary"><div class="empty">Loading...</div></div></div>
-          <div class="card"><div class="panel-head"><div><div class="panel-title">Connection</div><div class="panel-sub">Microsoft 365 / Excel status</div></div></div><div class="panel-body" id="connectionSummary"><div class="empty">Checking...</div></div></div>
-        </div>
-
-        <div class="card"><div class="panel-head"><div><div class="panel-title">Operations Workflow</div><div class="panel-sub">The workbook remains the source of truth</div></div></div><div class="panel-body"><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px"><div class="route"><b>1. Sales</b><div class="panel-sub">Create order</div></div><div class="route"><b>2. Purchasing</b><div class="panel-sub">Handle backorders</div></div><div class="route"><b>3. Receiving</b><div class="panel-sub">Receive goods</div></div><div class="route"><b>4. Shipping</b><div class="panel-sub">Schedule routes</div></div><div class="route"><b>5. Driver</b><div class="panel-sub">Load & deliver</div></div></div></div></div>
-      </section>
-
-      <section id="page-orders" class="page"><div class="toolbar"><div class="search"><span>🔍</span><input id="orderSearch" placeholder="Search order, customer or address..." oninput="renderOrders()"></div><div class="filters"><select id="orderFilter" onchange="renderOrders()"><option value="">All statuses</option><option>READY FOR DELIVERY</option><option>BACKORDER</option><option>PROCESSING</option><option>COMPLETED</option></select><button class="btn btn-primary" onclick="openSimpleOrderModal()">+ New Order</button></div></div><div id="ordersAlert"></div><div class="card"><div class="panel-head"><div><div class="panel-title">Orders</div><div class="panel-sub">Live rows from OrdersTable</div></div><span class="status s-blue" id="ordersCount">—</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Order</th><th>Customer</th><th>Address</th><th>Requested Date</th><th>Status</th><th>Delivery</th></tr></thead><tbody id="ordersBody"></tbody></table></div></div></section>
-
-      <section id="page-backorders" class="page"><div class="toolbar"><div><div class="title">Backorders</div><div class="subtitle">Live rows from BackordersTable</div></div><button class="btn btn-light" onclick="loadBackorders()">↻ Refresh</button></div><div id="backordersAlert"></div><div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Backorder</th><th>Order</th><th>Customer</th><th>Item</th><th>Qty</th><th>PO</th><th>Status</th></tr></thead><tbody id="backordersBody"></tbody></table></div></div></section>
-
-      <section id="page-purchasing" class="page"><div class="toolbar"><div><div class="title">Purchasing / PO</div><div class="subtitle">Live rows from PurchaseOrdersTable</div></div><button class="btn btn-light" onclick="loadPurchasing()">↻ Refresh</button></div><div id="purchasingAlert"></div><div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>PO</th><th>Supplier</th><th>PO Date</th><th>Expected</th><th>Items</th><th>Received</th><th>Status</th></tr></thead><tbody id="poBody"></tbody></table></div></div></section>
-
-      <section id="page-receiving" class="page"><div class="toolbar"><div><div class="title">Receiving</div><div class="subtitle">Live rows from ReceivingTable</div></div><button class="btn btn-light" onclick="loadReceiving()">↻ Refresh</button></div><div id="receivingAlert"></div><div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>PO</th><th>Item</th><th>Expected</th><th>Received</th><th>Remaining</th><th>Status</th><th>Receiver</th></tr></thead><tbody id="receivingBody"></tbody></table></div></div></section>
-
-      <section id="page-schedule" class="page"><div class="toolbar"><div><div class="title">Delivery Schedule</div><div class="subtitle">Live rows from DailyScheduleTable and RouteStopsTable</div></div><button class="btn btn-primary" onclick="showToast('Auto-optimization will be added after live data validation.')">✨ Auto Optimize</button></div><div id="scheduleAlert"></div><div class="card"><div class="panel-head"><div><div class="panel-title">Daily Routes</div><div class="panel-sub">Current daily schedule</div></div></div><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Driver</th><th>Truck</th><th>Route</th><th>Stops</th><th>Distance</th><th>Total Time</th><th>Load %</th><th>Status</th></tr></thead><tbody id="scheduleBody"></tbody></table></div></div></section>
-
-      <section id="page-drivers" class="page"><div class="toolbar"><div><div class="title">Drivers & Trucks</div><div class="subtitle">Live data from DriversTable and TrucksTable</div></div><button class="btn btn-light" onclick="loadDrivers()">↻ Refresh</button></div><div id="driversAlert"></div><div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Driver</th><th>Phone</th><th>Default Truck</th><th>Active</th></tr></thead><tbody id="driversBody"></tbody></table></div></div></section>
-
-      <section id="page-routes" class="page"><div class="toolbar"><div><div class="title">Routes</div><div class="subtitle">Route map will be connected after the workbook link is verified</div></div><button class="btn btn-primary" onclick="showToast('Map engine comes next.')">Route Planner</button></div><div class="card"><div class="panel-body"><div style="height:360px;border:1px solid var(--line);border-radius:14px;display:grid;place-items:center;text-align:center;background:linear-gradient(90deg,#f8fafc 1px,transparent 1px),linear-gradient(#f8fafc 1px,transparent 1px);background-size:35px 35px"><div><div style="font-size:44px">🗺️</div><div style="font-weight:850">Live route map</div><div class="panel-sub">We'll add colored driver routes, numbered stops, hover glow, distance/time and balancing in the next stage.</div></div></div></div></div></section>
-
-      <section id="page-issues" class="page"><div class="toolbar"><div><div class="title">Delivery Issues</div><div class="subtitle">Live data from DeliveryIssuesTable</div></div><button class="btn btn-light" onclick="loadIssues()">↻ Refresh</button></div><div id="issuesAlert"></div><div class="card"><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Order</th><th>Customer</th><th>Issue</th><th>Area</th><th>Severity</th><th>Resolved</th></tr></thead><tbody id="issuesBody"></tbody></table></div></div></section>
-
-      <section id="page-settings" class="page"><div class="setup"><div class="card"><div class="panel-head"><div><div class="panel-title">Microsoft 365 Connection</div><div class="panel-sub">Configuration for the shared Excel database</div></div></div><div class="panel-body"><div id="settingsAlert"></div><div class="form-grid"><div class="form"><label>Client ID</label><input value="ed8479d2-5a79-4030-9b29-007ae8b98dcd" readonly></div><div class="form"><label>Tenant ID</label><input value="9b01cfb5-bb13-476b-be96-44f4139eaa56" readonly></div><div class="form full"><label>Workbook file</label><input value="MouldingStoreDatabase.xlsx" readonly></div><div class="form"><label>Drive ID</label><input id="settingsDriveId" placeholder="Paste after owner setup"></div><div class="form"><label>Item ID</label><input id="settingsItemId" placeholder="Paste after owner setup"></div></div><div style="margin-top:15px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" onclick="findWorkbook()">Find My Workbook</button><button class="btn btn-light" onclick="saveWorkbookIds()">Save IDs Locally</button><button class="btn btn-light" onclick="testConnection()">Test Excel Connection</button></div><div style="margin-top:16px"><div class="panel-sub">For the shared company setup, the workbook must be shared with the Microsoft accounts that should use the app. Do not use an anonymous “Anyone with the link can edit” share link.</div></div><div id="setupResult" style="margin-top:15px"></div></div></div></div></section>
-    </div>
-  </main>
-</div>
-
-<div class="modal-backdrop" id="orderModal"><div class="modal"><div class="modal-head"><b>Create Customer Order</b><button class="icon-btn" onclick="closeModal('orderModal')">×</button></div><div class="modal-body"><div class="form-grid"><div class="form"><label>Order Number</label><input id="newOrderNumber" placeholder="10027"></div><div class="form"><label>Customer Name</label><input id="newCustomerName" placeholder="Customer name"></div><div class="form full"><label>Delivery Address</label><input id="newDeliveryAddress" placeholder="Delivery address"></div><div class="form"><label>Requested Delivery Date</label><input id="newRequestedDate" type="date"></div><div class="form"><label>Priority</label><select id="newPriority"><option>NORMAL</option><option>HIGH</option><option>URGENT</option></select></div><div class="form full"><label>Special Instructions</label><textarea id="newInstructions"></textarea></div></div></div><div class="modal-foot"><button class="btn btn-light" onclick="closeModal('orderModal')">Cancel</button><button class="btn btn-primary" onclick="createSimpleOrder()">Create Order Row</button></div></div></div>
-
-<div class="toast" id="toast">Saved</div>
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <script src="config.js"></script>
+  <script src="auth.js"></script>
+  <script src="excel-api.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
