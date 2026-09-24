@@ -1,4 +1,5 @@
-import {CONFIG} from "./config.js";
+const CONFIG={mapTiles:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",mapAttribution:"© OpenStreetMap contributors",geocoder:"https://photon.komoot.io/api",geocoderBbox:"-120.0,48.9,-110.0,60.0"};
+function bootApp(){
 const fleet=[
 {id:"5T-01",type:"5 Ton",capacity:5,color:"#4ea1ff"},{id:"5T-02",type:"5 Ton",capacity:5,color:"#6d7cff"},{id:"5T-03",type:"5 Ton",capacity:5,color:"#9a72ff"},{id:"5T-04",type:"5 Ton",capacity:5,color:"#48c7d9"},
 {id:"3T-01",type:"3 Ton",capacity:3,color:"#55c978"},{id:"3T-02",type:"3 Ton",capacity:3,color:"#9bd24f"},
@@ -51,8 +52,8 @@ async function photonSearch(q,extra={},endpoint=CONFIG.geocoder){
 function filterAlberta(features){return features.filter(f=>isAlberta(f.properties||{}));}
 function hasHouse(p){return /^\d/.test(String(p.housenumber||'').trim());}
 async function fetchAlbertaAddresses(q){
-  if(!/\\d/.test(q)) return {results:[],message:"Start with the house number, then the street name."};
-  const normalized=q.replace(/\\s+/g," ").trim();
+  if(!/\d/.test(q)) return {results:[],message:"Start with the house number, then the street name."};
+  const normalized=q.replace(/\s+/g," ").trim();
   let features=[];
   // Photon/OpenStreetMap house-level search. Alberta is enforced by bbox + client-side validation.
   try{features=await photonSearch(normalized,{layer:"house"});}catch(e){if(e.name==="AbortError")throw e;}
@@ -62,7 +63,7 @@ async function fetchAlbertaAddresses(q){
     const m=normalized.match(/^([0-9]+[A-Za-z-]*)\\s+(.+)$/);
     if(m){
       try{
-        const endpoint=CONFIG.geocoder.replace(/\\/api\\/?$/,'/structured');
+        const endpoint=CONFIG.geocoder.replace(/\/api\/?$/,'/structured');
         const params=new URLSearchParams({housenumber:m[1],street:m[2],state:"Alberta",countrycode:"CA",limit:"12",lang:"en",bbox:CONFIG.geocoderBbox});
         if(addressAC.controller) addressAC.controller.abort();
         addressAC.controller=new AbortController();
@@ -110,4 +111,6 @@ function move(id,tid){let j=jobs.find(x=>x.id===id),t=fleet.find(x=>x.id===tid);
 async function geo(q){try{const params=new URLSearchParams({q:`${q}, Alberta, Canada`,limit:"5",lang:"en",bbox:CONFIG.geocoderBbox});const r=await fetch(`${CONFIG.geocoder}?${params}`,{headers:{Accept:"application/json"}});if(!r.ok)return null;const d=await r.json();const x=(d.features||[]).map(photonFeatureToAddress).find(v=>{const p=v.photon?.properties||{};const state=String(p.state||p.province||"").toLowerCase();const country=String(p.countrycode||p.country_code||p.country||"").toLowerCase();return (country==="ca"||country==="canada")&&(state==="alberta"||state==="ab")&&Number.isFinite(v.lat)&&Number.isFinite(v.lon)});return x?{lat:x.lat,lng:x.lon}:null}catch{return null}}
 async function drawMap(){layers.forEach(x=>map.removeLayer(x));layers=[];let all=[];for(const t of fleet){let stops=jobs.filter(j=>j.truckId===t.id),pts=[];for(let i=0;i<stops.length;i++){let j=stops[i];if(j.lat==null){let p=await geo(j.address);if(p){Object.assign(j,p);save()}}if(j.lat==null)continue;pts.push([j.lat,j.lng]);all.push([j.lat,j.lng]);let icon=L.divIcon({className:"",html:`<div class="map-marker" style="background:${t.color}">${i+1}</div>`,iconSize:[29,29],iconAnchor:[14,14]});layers.push(L.marker([j.lat,j.lng],{icon}).bindPopup(`<b>${esc(j.customer)}</b><br>${esc(j.address)}<br>${t.id}`).addTo(map))}if(pts.length>1){let line=L.polyline(pts,{color:t.color,weight:5,opacity:.8});line.on("mouseover",()=>line.setStyle({weight:10}));line.on("mouseout",()=>line.setStyle({weight:5}));layers.push(line.addTo(map))}}if(all.length)map.fitBounds(all,{padding:[35,35],maxZoom:13})}
 async function share(id){let t=fleet.find(x=>x.id===id),stops=jobs.filter(j=>j.truckId===id);for(let j of stops)if(j.lat==null){let p=await geo(j.address);if(p)Object.assign(j,p)}let c=stops.filter(j=>j.lat!=null).map(j=>`${j.lat},${j.lng}`);if(!c.length)return alert("Could not geocode the route.");let u=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(c[0])}&destination=${encodeURIComponent(c.at(-1))}&travelmode=driving`;if(c.length>2)u+=`&waypoints=${encodeURIComponent(c.slice(1,-1).join("|"))}`;if(navigator.share)navigator.share({title:t.id+" Route",url:u}).catch(()=>{});else navigator.clipboard.writeText(u).then(()=>alert("Google Maps link copied."))}
-render();if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
+render();
+}
+window.addEventListener("DOMContentLoaded",()=>{try{bootApp()}catch(err){console.error(err);const app=document.querySelector("#app");if(app)app.innerHTML=`<div class="fatal"><div class="fatal-card"><div class="fatal-mark">MS</div><h1>Moulding Store</h1><p>The app hit a loading error.</p><details><summary>Technical details</summary><pre>${String(err?.stack||err)}</pre></details></div></div>`}});
