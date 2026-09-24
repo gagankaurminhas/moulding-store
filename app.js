@@ -27,16 +27,20 @@ async function fetchAlbertaAddresses(q){
     return fetchCanadaPostAddresses(q);
   }
 
+  // Search as a complete Alberta address, not as a city/place search.
+  // Nominatim can still return broader places for weak queries, so those are
+  // removed below unless BOTH house_number and street/road are present.
+  const searchText = `${q}, Alberta, Canada`;
   const params=new URLSearchParams({
-    q:q,
+    q:searchText,
     format:"jsonv2",
     addressdetails:"1",
-    limit:"12",
-    countrycodes:CONFIG.geocoderCountry||"ca",
-    layer:"address",
+    limit:"20",
+    countrycodes:"ca",
     dedupe:"1",
     viewbox:CONFIG.geocoderViewbox,
-    bounded:"1"
+    bounded:"1",
+    "accept-language":"en"
   });
   const r=await fetch(`${CONFIG.geocoder}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
   if(!r.ok)throw new Error("Address lookup failed");
@@ -50,7 +54,11 @@ async function fetchAlbertaAddresses(q){
     const road=String(a.road||a.street||"").trim();
     return country==="ca" &&
       (province==="alberta" || iso==="CA-AB") &&
-      !!house && !!road;
+      !!house && !!road &&
+      // Reject results that are only municipalities, provinces, postal areas, etc.
+      !["city","town","village","municipality","county","state","province","postcode"].includes(
+        String(x.type||"").toLowerCase()
+      );
   });
 }
 
@@ -91,10 +99,10 @@ async function fetchCanadaPostAddresses(q){
   return detailed;
 }
 function selectAddressSuggestion(i){const item=addressAC.results[i];if(!item)return;const input=document.querySelector("#address");input.value=item.display_name||"";input.dataset.lat=item.lat||"";input.dataset.lng=item.lon||"";input.dataset.placeId=item.place_id||"";input.dataset.provider=item.canadaPost?"canadapost":"nominatim";input.dataset.selected="1";clearAddressSuggestions()}
-function setupAddressAutocomplete(){const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.parentElement.classList.add("address-autocomplete-wrap");const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{renderAddressSuggestions(await fetchAlbertaAddresses(q))}catch(e){if(e.name!=="AbortError")clearAddressSuggestions()}},250)});input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})}
+function setupAddressAutocomplete(){const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.setAttribute("placeholder","House number + street (e.g. 123 17 Ave SW)");input.parentElement.classList.add("address-autocomplete-wrap");const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{renderAddressSuggestions(await fetchAlbertaAddresses(q))}catch(e){if(e.name!=="AbortError")clearAddressSuggestions()}},250)});input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})}
 setupAddressAutocomplete();
 
-document.querySelector("#form").onsubmit=e=>{e.preventDefault();const a=document.querySelector("#address");if(!a.dataset.selected){alert("Please select a complete Alberta street address from the suggestions, including the house number.");a.focus();return}jobs.push({id:crypto.randomUUID(),customer:customer.value.trim(),address:a.value.trim(),vehicle:vehicle.value,service:Number(service.value||15),weight:Number(weight.value||0),truckId:null,lat:a.dataset.lat?+a.dataset.lat:null,lng:a.dataset.lng?+a.dataset.lng:null});save();e.target.reset();service.value=15;render()};
+document.querySelector("#form").onsubmit=e=>{e.preventDefault();const a=document.querySelector("#address");if(!a.dataset.selected || !/\d+/.test(a.value)){alert("Please select a complete Alberta street address from the suggestions, including the house number and street.");a.focus();return}jobs.push({id:crypto.randomUUID(),customer:customer.value.trim(),address:a.value.trim(),vehicle:vehicle.value,service:Number(service.value||15),weight:Number(weight.value||0),truckId:null,lat:a.dataset.lat?+a.dataset.lat:null,lng:a.dataset.lng?+a.dataset.lng:null});save();e.target.reset();service.value=15;render()};
 document.querySelector("#opt").onclick=()=>{for(const type of ["5 Ton","3 Ton","Sprinter"]){let ts=fleet.filter(t=>t.type===type),list=jobs.filter(j=>j.vehicle===type);list.forEach((j,i)=>j.truckId=ts[i%ts.length].id)}save();render()};
 document.querySelector("#export").onclick=()=>{let rows=[["ID","Customer","Address","Vehicle","Truck","Stop","ServiceMinutes","WeightTons"]];fleet.forEach(t=>jobs.filter(j=>j.truckId===t.id).forEach((j,i)=>rows.push([j.id,j.customer,j.address,j.vehicle,t.id,i+1,j.service,j.weight])));jobs.filter(j=>!j.truckId).forEach(j=>rows.push([j.id,j.customer,j.address,j.vehicle,"","",j.service,j.weight]));let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\\n")],{type:"text/csv"}));a.download="moulding-routes.csv";a.click()};
 function render(){document.querySelector("#jc").textContent=jobs.length;document.querySelector("#ac").textContent=jobs.filter(j=>j.truckId).length;let root=document.querySelector("#routes");root.innerHTML="";fleet.forEach(t=>{let stops=jobs.filter(j=>j.truckId===t.id),el=document.createElement("div");el.className="truck";el.innerHTML=`<div class="truckhead"><div><b>🚚 ${t.id}</b><div class="muted">${t.type} • ${t.capacity?t.capacity+"T capacity":"Van"} • ${stops.length} stops</div></div><button class="btn" data-share="${t.id}">Share</button></div><div class="truckbody" data-truck="${t.id}"></div>`;let body=el.querySelector(".truckbody");body.ondragover=e=>{e.preventDefault();body.classList.add("over")};body.ondragleave=()=>body.classList.remove("over");body.ondrop=e=>{e.preventDefault();body.classList.remove("over");move(e.dataTransfer.getData("job"),t.id)};if(!stops.length)body.innerHTML='<div class="empty">Drop compatible job here</div>';stops.forEach((j,i)=>{let s=document.createElement("div");s.className="stop";s.draggable=true;s.innerHTML=`<div class="num">${i+1}</div><div class="info"><b>${esc(j.customer)}</b><span>${esc(j.address)}</span></div><span class="pill">${j.vehicle}</span>`;s.ondragstart=e=>e.dataTransfer.setData("job",j.id);body.appendChild(s)});root.appendChild(el)});root.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>share(b.dataset.share));drawMap()}

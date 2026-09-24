@@ -28,3 +28,10 @@ Connect the exact spreadsheet/list you already have. Then replace localStorage w
 
 ### Address autocomplete
 The address field now requires a house/building number and street and returns Alberta-only premise-level results. The fallback uses Nominatim's `address` layer and rejects city/street-only results. For Canada Post AddressComplete-quality coverage, set `addressProvider` to `canadapost` and add an AddressComplete API key restricted to your GitHub Pages domain. Canada Post's Find/Retrieve API is designed for address autocomplete and returns fields such as BuildingNumber, Street, City, Province and PostalCode.
+
+
+### Address autocomplete — street level only
+
+The address field now requires a numeric house/building number and filters out city-only, town-only, province-only, postal-code-only and other broad place results. The fallback search is restricted to Alberta.
+
+For the closest possible Canada Post AddressComplete experience, create an AddressComplete API key and set `addressProvider:"canadapost"` and `canadaPostKey:"..."` in `config.js`. Canada Post's Find service returns autocomplete candidates and Retrieve returns fields including BuildingNumber, Street, City, Province and PostalCode. 

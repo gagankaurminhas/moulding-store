@@ -3,10 +3,15 @@ export const CONFIG={
   mapAttribution:"© OpenStreetMap contributors",
   geocoder:"https://nominatim.openstreetmap.org/search",
   geocoderCountry:"ca",
+  // Alberta bounding box: west, north, east, south
   geocoderViewbox:"-120.0,60.0,-110.0,48.9",
-  // "nominatim" works without a key but has less complete address coverage.
-  // Set to "canadapost" and add your restricted AddressComplete key for
-  // Canada-Post-style premise/address autocomplete.
+
+  // For true Canada Post-style premise autocomplete, set:
+  // addressProvider:"canadapost",
+  // canadaPostKey:"YOUR_RESTRICTED_ADDRESSCOMPLETE_KEY"
+  //
+  // With no key, the app uses an Alberta-only street/premise fallback
+  // and will NEVER display city-only results.
   addressProvider:"nominatim",
   canadaPostKey:"",
   apiBase:""
