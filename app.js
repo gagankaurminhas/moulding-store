@@ -9,97 +9,34 @@ const map=L.map("map").setView([51.0447,-114.0719],10);L.tileLayer(CONFIG.mapTil
 const save=()=>localStorage.setItem("ms_jobs",JSON.stringify(jobs));
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
-// Alberta-only address autocomplete. The selected result also stores coordinates
-// so routing can use the exact address the user selected.
+// No-API-key Alberta address autocomplete using Photon/OpenStreetMap.
+// We deliberately require a house/building number + street and filter out
+// city/street-only results so the dropdown is useful for deliveries.
 const addressAC={timer:null,controller:null,results:[],active:-1};
 function clearAddressSuggestions(){const box=document.querySelector("#address-suggestions");if(box){box.innerHTML="";box.classList.remove("show")}addressAC.results=[];addressAC.active=-1}
-function renderAddressSuggestions(results){const box=document.querySelector("#address-suggestions");if(!box)return;box.innerHTML="";addressAC.results=results;addressAC.active=-1;if(!results.length){box.classList.remove("show");return}results.forEach((item,i)=>{const b=document.createElement("button");b.type="button";b.className="address-suggestion";b.setAttribute("role","option");b.dataset.index=i;const cp=item.canadaPost||null; const parts=(item.display_name||"").split(",").map(x=>x.trim()).filter(Boolean); const title=cp?[cp.BuildingNumber,cp.Street].filter(Boolean).join(" "):parts.slice(0,2).join(", "); const detail=cp?[cp.City,cp.ProvinceCode,cp.PostalCode].filter(Boolean).join(", "):parts.slice(2).join(", "); b.innerHTML=`<span class="address-suggestion-icon">⌖</span><span class="address-suggestion-copy"><strong>${esc(title)}</strong><small>${esc(detail)}</small></span>`;b.addEventListener("mousedown",e=>{e.preventDefault();selectAddressSuggestion(i)});box.appendChild(b)});box.classList.add("show")}
+function renderAddressSuggestions(results){const box=document.querySelector("#address-suggestions");if(!box)return;box.innerHTML="";addressAC.results=results;addressAC.active=-1;if(!results.length){box.classList.remove("show");return}results.forEach((item,i)=>{const b=document.createElement("button");b.type="button";b.className="address-suggestion";b.setAttribute("role","option");b.dataset.index=i;const p=item.properties||{};const title=[p.housenumber,p.street||p.name].filter(Boolean).join(" ");const detail=[p.city||p.locality,p.state||p.province,p.postcode].filter(Boolean).join(", ");b.innerHTML=`<span class="address-suggestion-icon">⌖</span><span class="address-suggestion-copy"><strong>${esc(title||item.label||"")}</strong><small>${esc(detail)}</small></span>`;b.addEventListener("mousedown",e=>{e.preventDefault();selectAddressSuggestion(i)});box.appendChild(b)});box.classList.add("show")}
+function photonFeatureToAddress(f){const p=f.properties||{};const coords=f.geometry&&f.geometry.coordinates||[];const label=f.properties&&f.properties.label||[p.housenumber,p.street||p.name,p.city||p.locality,p.state,p.postcode,p.country].filter(Boolean).join(", ");return {display_name:label,lat:Number(coords[1]),lon:Number(coords[0]),place_id:p.osm_id||p.osm_type||label,provider:"photon",photon:f}}
 async function fetchAlbertaAddresses(q){
-  // Only search once the user has entered a house/building number.
-  // This prevents city/street-only suggestions and keeps the list focused on deliverable addresses.
   if(!/\d/.test(q)) return [];
   if(addressAC.controller) addressAC.controller.abort();
   addressAC.controller=new AbortController();
-
-  // If a Canada Post AddressComplete key is configured, use it for postal-quality
-  // address suggestions. Otherwise use the Alberta-bounded OSM fallback below.
-  if(CONFIG.addressProvider === "canadapost" && CONFIG.canadaPostKey){
-    return fetchCanadaPostAddresses(q);
-  }
-
-  // Search as a complete Alberta address, not as a city/place search.
-  // Nominatim can still return broader places for weak queries, so those are
-  // removed below unless BOTH house_number and street/road are present.
-  const searchText = `${q}, Alberta, Canada`;
-  const params=new URLSearchParams({
-    q:searchText,
-    format:"jsonv2",
-    addressdetails:"1",
-    limit:"20",
-    countrycodes:"ca",
-    dedupe:"1",
-    viewbox:CONFIG.geocoderViewbox,
-    bounded:"1",
-    "accept-language":"en"
-  });
+  const params=new URLSearchParams({q:`${q}, Alberta, Canada`,limit:"12",lang:"en",bbox:CONFIG.geocoderBbox});
   const r=await fetch(`${CONFIG.geocoder}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
   if(!r.ok)throw new Error("Address lookup failed");
-  const d=await r.json();
-  return d.filter(x=>{
-    const a=x.address||{};
-    const country=String(a.country_code||"").toLowerCase();
-    const province=String(a.state||"").toLowerCase();
-    const iso=String(a["ISO3166-2-lvl4"]||"").toUpperCase();
-    const house=String(a.house_number||"").trim();
-    const road=String(a.road||a.street||"").trim();
-    return country==="ca" &&
-      (province==="alberta" || iso==="CA-AB") &&
-      !!house && !!road &&
-      // Reject results that are only municipalities, provinces, postal areas, etc.
-      !["city","town","village","municipality","county","state","province","postcode"].includes(
-        String(x.type||"").toLowerCase()
-      );
-  });
-}
-
-async function fetchCanadaPostAddresses(q){
-  const base="https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Find/v2.10/json3.ws";
-  const params=new URLSearchParams({
-    Key:CONFIG.canadaPostKey,
-    SearchTerm:q,
-    Country:"CAN",
-    LanguagePreference:"en",
-    MaxSuggestions:"8"
-  });
-  const r=await fetch(`${base}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
-  if(!r.ok)throw new Error("Canada Post address lookup failed");
   const data=await r.json();
-  if(!Array.isArray(data.Items)) return [];
-
-  // Find returns candidates. Retrieve gives the authoritative address fields,
-  // including BuildingNumber, Street, City, ProvinceName and PostalCode.
-  const candidates=data.Items.filter(x=>x.Next==="Retrieve" || x.Next==="Find");
-  const detailed=[];
-  for(const item of candidates){
-    if(item.Next!=="Retrieve") continue;
-    try{
-      const retrieveUrl="https://ws1.postescanada-canadapost.ca/AddressComplete/Interactive/Retrieve/v2.11/json3.ws";
-      const rp=new URLSearchParams({Key:CONFIG.canadaPostKey,Id:item.Id});
-      const rr=await fetch(`${retrieveUrl}?${rp}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
-      if(!rr.ok) continue;
-      const rd=await rr.json();
-      const row=Array.isArray(rd.Items)?rd.Items[0]:rd.Items;
-      if(!row) continue;
-      if(String(row.ProvinceCode||"").toUpperCase()!=="AB") continue;
-      if(!row.BuildingNumber || !row.Street) continue;
-      const display=row.Label || [row.Line1,row.Line2,row.City,row.ProvinceCode,row.PostalCode].filter(Boolean).join(", ");
-      detailed.push({display_name:display,lat:null,lon:null,place_id:item.Id,canadaPost:row});
-    }catch(e){if(e.name==="AbortError")throw e;}
-  }
-  return detailed;
+  const features=Array.isArray(data.features)?data.features:[];
+  return features.map(photonFeatureToAddress).filter(x=>{
+    const p=x.photon?.properties||{};
+    const country=String(p.countrycode||p.country_code||"").toLowerCase();
+    const state=String(p.state||p.province||"").toLowerCase();
+    const house=String(p.housenumber||"").trim();
+    const street=String(p.street||p.name||"").trim();
+    return (country==="ca"||String(p.country||"").toLowerCase()==="canada") &&
+      (state==="alberta"||state==="ab") && !!house && !!street && Number.isFinite(x.lat) && Number.isFinite(x.lon);
+  }).slice(0,8);
 }
-function selectAddressSuggestion(i){const item=addressAC.results[i];if(!item)return;const input=document.querySelector("#address");input.value=item.display_name||"";input.dataset.lat=item.lat||"";input.dataset.lng=item.lon||"";input.dataset.placeId=item.place_id||"";input.dataset.provider=item.canadaPost?"canadapost":"nominatim";input.dataset.selected="1";clearAddressSuggestions()}
-function setupAddressAutocomplete(){const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.setAttribute("placeholder","House number + street (e.g. 123 17 Ave SW)");input.parentElement.classList.add("address-autocomplete-wrap");const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{renderAddressSuggestions(await fetchAlbertaAddresses(q))}catch(e){if(e.name!=="AbortError")clearAddressSuggestions()}},250)});input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})}
+function selectAddressSuggestion(i){const item=addressAC.results[i];if(!item)return;const input=document.querySelector("#address");input.value=item.display_name||"";input.dataset.lat=item.lat||"";input.dataset.lng=item.lon||"";input.dataset.placeId=item.place_id||"";input.dataset.provider="photon";input.dataset.selected="1";clearAddressSuggestions()}
+function setupAddressAutocomplete(){const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.setAttribute("placeholder","House number + street (e.g. 123 17 Ave SW)");input.parentElement.classList.add("address-autocomplete-wrap");const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{renderAddressSuggestions(await fetchAlbertaAddresses(q))}catch(e){if(e.name!=="AbortError")clearAddressSuggestions()}},350)});input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})}
 setupAddressAutocomplete();
 
 document.querySelector("#form").onsubmit=e=>{e.preventDefault();const a=document.querySelector("#address");if(!a.dataset.selected || !/\d+/.test(a.value)){alert("Please select a complete Alberta street address from the suggestions, including the house number and street.");a.focus();return}jobs.push({id:crypto.randomUUID(),customer:customer.value.trim(),address:a.value.trim(),vehicle:vehicle.value,service:Number(service.value||15),weight:Number(weight.value||0),truckId:null,lat:a.dataset.lat?+a.dataset.lat:null,lng:a.dataset.lng?+a.dataset.lng:null});save();e.target.reset();service.value=15;render()};
@@ -107,7 +44,7 @@ document.querySelector("#opt").onclick=()=>{for(const type of ["5 Ton","3 Ton","
 document.querySelector("#export").onclick=()=>{let rows=[["ID","Customer","Address","Vehicle","Truck","Stop","ServiceMinutes","WeightTons"]];fleet.forEach(t=>jobs.filter(j=>j.truckId===t.id).forEach((j,i)=>rows.push([j.id,j.customer,j.address,j.vehicle,t.id,i+1,j.service,j.weight])));jobs.filter(j=>!j.truckId).forEach(j=>rows.push([j.id,j.customer,j.address,j.vehicle,"","",j.service,j.weight]));let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\\n")],{type:"text/csv"}));a.download="moulding-routes.csv";a.click()};
 function render(){document.querySelector("#jc").textContent=jobs.length;document.querySelector("#ac").textContent=jobs.filter(j=>j.truckId).length;let root=document.querySelector("#routes");root.innerHTML="";fleet.forEach(t=>{let stops=jobs.filter(j=>j.truckId===t.id),el=document.createElement("div");el.className="truck";el.innerHTML=`<div class="truckhead"><div><b>🚚 ${t.id}</b><div class="muted">${t.type} • ${t.capacity?t.capacity+"T capacity":"Van"} • ${stops.length} stops</div></div><button class="btn" data-share="${t.id}">Share</button></div><div class="truckbody" data-truck="${t.id}"></div>`;let body=el.querySelector(".truckbody");body.ondragover=e=>{e.preventDefault();body.classList.add("over")};body.ondragleave=()=>body.classList.remove("over");body.ondrop=e=>{e.preventDefault();body.classList.remove("over");move(e.dataTransfer.getData("job"),t.id)};if(!stops.length)body.innerHTML='<div class="empty">Drop compatible job here</div>';stops.forEach((j,i)=>{let s=document.createElement("div");s.className="stop";s.draggable=true;s.innerHTML=`<div class="num">${i+1}</div><div class="info"><b>${esc(j.customer)}</b><span>${esc(j.address)}</span></div><span class="pill">${j.vehicle}</span>`;s.ondragstart=e=>e.dataTransfer.setData("job",j.id);body.appendChild(s)});root.appendChild(el)});root.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>share(b.dataset.share));drawMap()}
 function move(id,tid){let j=jobs.find(x=>x.id===id),t=fleet.find(x=>x.id===tid);if(j&&t&&j.vehicle===t.type){j.truckId=tid;save();render()}}
-async function geo(q){try{const params=new URLSearchParams({format:"jsonv2",limit:"1",q,countrycodes:CONFIG.geocoderCountry||"ca",viewbox:CONFIG.geocoderViewbox,bounded:"1"});let r=await fetch(`${CONFIG.geocoder}?${params}`),d=await r.json();const x=d.find(v=>{const a=v.address||{};return String(a.country_code||"").toLowerCase()==="ca"&&(String(a.state||"").toLowerCase()==="alberta"||String(a["ISO3166-2-lvl4"]||"").toUpperCase()==="CA-AB")});return x?{lat:+x.lat,lng:+x.lon}:null}catch{return null}}
+async function geo(q){try{const params=new URLSearchParams({q:`${q}, Alberta, Canada`,limit:"5",lang:"en",bbox:CONFIG.geocoderBbox});const r=await fetch(`${CONFIG.geocoder}?${params}`,{headers:{Accept:"application/json"}});if(!r.ok)return null;const d=await r.json();const x=(d.features||[]).map(photonFeatureToAddress).find(v=>{const p=v.photon?.properties||{};const state=String(p.state||p.province||"").toLowerCase();const country=String(p.countrycode||p.country_code||p.country||"").toLowerCase();return (country==="ca"||country==="canada")&&(state==="alberta"||state==="ab")&&Number.isFinite(v.lat)&&Number.isFinite(v.lon)});return x?{lat:x.lat,lng:x.lon}:null}catch{return null}}
 async function drawMap(){layers.forEach(x=>map.removeLayer(x));layers=[];let all=[];for(const t of fleet){let stops=jobs.filter(j=>j.truckId===t.id),pts=[];for(let i=0;i<stops.length;i++){let j=stops[i];if(j.lat==null){let p=await geo(j.address);if(p){Object.assign(j,p);save()}}if(j.lat==null)continue;pts.push([j.lat,j.lng]);all.push([j.lat,j.lng]);let icon=L.divIcon({className:"",html:`<div class="map-marker" style="background:${t.color}">${i+1}</div>`,iconSize:[29,29],iconAnchor:[14,14]});layers.push(L.marker([j.lat,j.lng],{icon}).bindPopup(`<b>${esc(j.customer)}</b><br>${esc(j.address)}<br>${t.id}`).addTo(map))}if(pts.length>1){let line=L.polyline(pts,{color:t.color,weight:5,opacity:.8});line.on("mouseover",()=>line.setStyle({weight:10}));line.on("mouseout",()=>line.setStyle({weight:5}));layers.push(line.addTo(map))}}if(all.length)map.fitBounds(all,{padding:[35,35],maxZoom:13})}
 async function share(id){let t=fleet.find(x=>x.id===id),stops=jobs.filter(j=>j.truckId===id);for(let j of stops)if(j.lat==null){let p=await geo(j.address);if(p)Object.assign(j,p)}let c=stops.filter(j=>j.lat!=null).map(j=>`${j.lat},${j.lng}`);if(!c.length)return alert("Could not geocode the route.");let u=`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(c[0])}&destination=${encodeURIComponent(c.at(-1))}&travelmode=driving`;if(c.length>2)u+=`&waypoints=${encodeURIComponent(c.slice(1,-1).join("|"))}`;if(navigator.share)navigator.share({title:t.id+" Route",url:u}).catch(()=>{});else navigator.clipboard.writeText(u).then(()=>alert("Google Maps link copied."))}
 render();if("serviceWorker"in navigator)navigator.serviceWorker.register("./sw.js").catch(()=>{});
