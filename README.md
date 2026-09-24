@@ -24,3 +24,6 @@ Repository -> Settings -> Pages -> Deploy from branch -> main -> /(root).
 
 ## Production next step
 Connect the exact spreadsheet/list you already have. Then replace localStorage with that API and add a secure backend for traffic-aware routing/optimization.
+
+### Alberta-only address autocomplete
+The delivery address field now returns only Alberta, Canada results using an Alberta geographic bounding box plus a final province/country filter. Selected results retain latitude/longitude for routing.

@@ -1,1 +1,1 @@
-export const CONFIG={mapTiles:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",mapAttribution:"© OpenStreetMap contributors",geocoder:"https://nominatim.openstreetmap.org/search",apiBase:""};
+export const CONFIG={mapTiles:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",mapAttribution:"© OpenStreetMap contributors",geocoder:"https://nominatim.openstreetmap.org/search",geocoderCountry:"ca",geocoderViewbox:"-120.0,60.0,-110.0,48.9",apiBase:""};
