@@ -10,36 +10,99 @@ const save=()=>localStorage.setItem("ms_jobs",JSON.stringify(jobs));
 const esc=x=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 // No-API-key Alberta address autocomplete using Photon/OpenStreetMap.
-// We deliberately require a house/building number + street and filter out
-// city/street-only results so the dropdown is useful for deliveries.
+// Photon supports search-as-you-type, house/street layers, country filtering and bounding boxes.
 const addressAC={timer:null,controller:null,results:[],active:-1};
 function clearAddressSuggestions(){const box=document.querySelector("#address-suggestions");if(box){box.innerHTML="";box.classList.remove("show")}addressAC.results=[];addressAC.active=-1}
-function renderAddressSuggestions(results){const box=document.querySelector("#address-suggestions");if(!box)return;box.innerHTML="";addressAC.results=results;addressAC.active=-1;if(!results.length){box.classList.remove("show");return}results.forEach((item,i)=>{const b=document.createElement("button");b.type="button";b.className="address-suggestion";b.setAttribute("role","option");b.dataset.index=i;const p=item.properties||{};const title=[p.housenumber,p.street||p.name].filter(Boolean).join(" ");const detail=[p.city||p.locality,p.state||p.province,p.postcode].filter(Boolean).join(", ");b.innerHTML=`<span class="address-suggestion-icon">⌖</span><span class="address-suggestion-copy"><strong>${esc(title||item.label||"")}</strong><small>${esc(detail)}</small></span>`;b.addEventListener("mousedown",e=>{e.preventDefault();selectAddressSuggestion(i)});box.appendChild(b)});box.classList.add("show")}
-function photonFeatureToAddress(f){const p=f.properties||{};const coords=f.geometry&&f.geometry.coordinates||[];const label=f.properties&&f.properties.label||[p.housenumber,p.street||p.name,p.city||p.locality,p.state,p.postcode,p.country].filter(Boolean).join(", ");return {display_name:label,lat:Number(coords[1]),lon:Number(coords[0]),place_id:p.osm_id||p.osm_type||label,provider:"photon",photon:f}}
-async function fetchAlbertaAddresses(q){
-  if(!/\d/.test(q)) return [];
+function addressText(item){const p=item.properties||{};return [p.housenumber,p.street||p.name].filter(Boolean).join(" ")}
+function addressDetail(item){const p=item.properties||{};return [p.city||p.locality,p.state||p.province,p.postcode].filter(Boolean).join(", ")}
+function renderAddressSuggestions(results,message=""){
+  const box=document.querySelector("#address-suggestions");if(!box)return;
+  box.innerHTML="";addressAC.results=results;addressAC.active=-1;
+  if(!results.length){
+    if(message){const d=document.createElement("div");d.className="address-no-results";d.textContent=message;box.appendChild(d);box.classList.add("show");}
+    else box.classList.remove("show");
+    return;
+  }
+  results.forEach((item,i)=>{
+    const b=document.createElement("button");b.type="button";b.className="address-suggestion";b.setAttribute("role","option");
+    const title=addressText(item)||item.display_name||"Address";const detail=addressDetail(item);
+    b.innerHTML=`<span class="address-suggestion-icon">⌖</span><span class="address-suggestion-copy"><strong>${esc(title)}</strong><small>${esc(detail)}${item.streetOnly?' • street match — verify house number':''}</small></span>`;
+    b.addEventListener("mousedown",e=>{e.preventDefault();selectAddressSuggestion(i)});box.appendChild(b)
+  });box.classList.add("show")
+}
+function photonFeatureToAddress(f,streetOnly=false){
+  const p=f.properties||{},coords=f.geometry&&f.geometry.coordinates||[];
+  const label=[p.housenumber,p.street||p.name,p.city||p.locality,p.state,p.postcode,p.country].filter(Boolean).join(", ");
+  return {display_name:label,lat:Number(coords[1]),lon:Number(coords[0]),place_id:p.osm_id||label,provider:"photon",photon:f,streetOnly}
+}
+function isAlberta(p){
+  const country=String(p.countrycode||p.country_code||"").toLowerCase();
+  const state=String(p.state||p.province||"").toLowerCase();
+  return (country==="ca"||country==="canada")&&(state==="alberta"||state==="ab");
+}
+async function photonSearch(q,extra={},endpoint=CONFIG.geocoder){
   if(addressAC.controller) addressAC.controller.abort();
   addressAC.controller=new AbortController();
-  const params=new URLSearchParams({q:`${q}, Alberta, Canada`,limit:"12",lang:"en",bbox:CONFIG.geocoderBbox});
-  const r=await fetch(`${CONFIG.geocoder}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
-  if(!r.ok)throw new Error("Address lookup failed");
-  const data=await r.json();
-  const features=Array.isArray(data.features)?data.features:[];
-  return features.map(photonFeatureToAddress).filter(x=>{
-    const p=x.photon?.properties||{};
-    const country=String(p.countrycode||p.country_code||"").toLowerCase();
-    const state=String(p.state||p.province||"").toLowerCase();
-    const house=String(p.housenumber||"").trim();
-    const street=String(p.street||p.name||"").trim();
-    return (country==="ca"||String(p.country||"").toLowerCase()==="canada") &&
-      (state==="alberta"||state==="ab") && !!house && !!street && Number.isFinite(x.lat) && Number.isFinite(x.lon);
-  }).slice(0,8);
+  const params=new URLSearchParams({q,limit:"12",lang:"en",countrycode:"CA",bbox:CONFIG.geocoderBbox,...extra});
+  const r=await fetch(`${endpoint}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
+  if(!r.ok)throw new Error(`Address service returned ${r.status}`);
+  const data=await r.json();return Array.isArray(data.features)?data.features:[];
 }
-function selectAddressSuggestion(i){const item=addressAC.results[i];if(!item)return;const input=document.querySelector("#address");input.value=item.display_name||"";input.dataset.lat=item.lat||"";input.dataset.lng=item.lon||"";input.dataset.placeId=item.place_id||"";input.dataset.provider="photon";input.dataset.selected="1";clearAddressSuggestions()}
-function setupAddressAutocomplete(){const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.setAttribute("placeholder","House number + street (e.g. 123 17 Ave SW)");input.parentElement.classList.add("address-autocomplete-wrap");const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{renderAddressSuggestions(await fetchAlbertaAddresses(q))}catch(e){if(e.name!=="AbortError")clearAddressSuggestions()}},350)});input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})}
+function filterAlberta(features){return features.filter(f=>isAlberta(f.properties||{}));}
+function hasHouse(p){return /^\\d/.test(String(p.housenumber||'').trim());}
+async function fetchAlbertaAddresses(q){
+  if(!/\\d/.test(q)) return {results:[],message:"Start with the house number, then the street name."};
+  const normalized=q.replace(/\\s+/g," ").trim();
+  let features=[];
+  // Photon/OpenStreetMap house-level search. Alberta is enforced by bbox + client-side validation.
+  try{features=await photonSearch(normalized,{layer:"house"});}catch(e){if(e.name==="AbortError")throw e;}
+  let results=filterAlberta(features).filter(f=>hasHouse(f.properties||{})).map(f=>photonFeatureToAddress(f,false));
+  // Structured Photon search is useful when the user types house number + street + city.
+  if(!results.length){
+    const m=normalized.match(/^([0-9]+[A-Za-z-]*)\\s+(.+)$/);
+    if(m){
+      try{
+        const endpoint=CONFIG.geocoder.replace(/\\/api\\/?$/,'/structured');
+        const params=new URLSearchParams({housenumber:m[1],street:m[2],state:"Alberta",countrycode:"CA",limit:"12",lang:"en",bbox:CONFIG.geocoderBbox});
+        if(addressAC.controller) addressAC.controller.abort();
+        addressAC.controller=new AbortController();
+        const r=await fetch(`${endpoint}?${params}`,{signal:addressAC.controller.signal,headers:{Accept:"application/json"}});
+        if(r.ok){const d=await r.json();features=Array.isArray(d.features)?d.features:[];results=filterAlberta(features).filter(f=>hasHouse(f.properties||{})).map(f=>photonFeatureToAddress(f,false));}
+      }catch(e){if(e.name==="AbortError")throw e;}
+    }
+  }
+  // Broader Photon search catches OSM buildings/places that aren't indexed as house layer.
+  if(!results.length){
+    try{features=await photonSearch(normalized);}catch(e){if(e.name==="AbortError")throw e;features=[];}
+    results=filterAlberta(features).filter(f=>hasHouse(f.properties||{})).map(f=>photonFeatureToAddress(f,false));
+  }
+  if(results.length)return {results:results.slice(0,8)};
+  return {results:[],message:"No exact Alberta address found. Try adding the city or postal code."};
+}
+async function resolveAddressCoordinates(text){
+  try{
+    const fs=await photonSearch(text,{layer:"house"});
+    const f=filterAlberta(fs).find(x=>hasHouse(x.properties||{})&&Number.isFinite(Number(x.geometry?.coordinates?.[1]))&&Number.isFinite(Number(x.geometry?.coordinates?.[0])));
+    if(f)return {lat:Number(f.geometry.coordinates[1]),lng:Number(f.geometry.coordinates[0])};
+  }catch(e){}
+  return null;
+}
+function selectAddressSuggestion(i){
+  const item=addressAC.results[i];if(!item)return;const input=document.querySelector("#address");
+  let value=item.display_name||"";
+  if(item.streetOnly){const typed=input.value.trim();const m=typed.match(/^\s*([0-9]+[A-Za-z-]*)\s+/);if(m)value=`${m[1]} ${addressText(item)}`;}
+  input.value=value;input.dataset.lat=Number.isFinite(item.lat)?item.lat:"";input.dataset.lng=Number.isFinite(item.lon)?item.lon:"";input.dataset.placeId=item.place_id||"";input.dataset.provider="photon";input.dataset.selected="1";input.dataset.streetOnly=item.streetOnly?"1":"";clearAddressSuggestions();
+}
+function setupAddressAutocomplete(){
+  const input=document.querySelector("#address");if(!input)return;input.setAttribute("autocomplete","off");input.setAttribute("aria-autocomplete","list");input.setAttribute("placeholder","House number + street (e.g. 123 17 Ave SW)");input.parentElement.classList.add("address-autocomplete-wrap");
+  const box=document.createElement("div");box.id="address-suggestions";box.className="address-suggestions";box.setAttribute("role","listbox");input.parentElement.appendChild(box);
+  input.addEventListener("input",()=>{input.dataset.selected="";input.dataset.lat="";input.dataset.lng="";input.dataset.streetOnly="";const q=input.value.trim();clearTimeout(addressAC.timer);if(q.length<3){clearAddressSuggestions();return}addressAC.timer=setTimeout(async()=>{try{const out=await fetchAlbertaAddresses(q);renderAddressSuggestions(out.results,out.message)}catch(e){if(e.name!=="AbortError")renderAddressSuggestions([],"Address search is temporarily unavailable. You can try again in a moment.")}},300)});
+  input.addEventListener("keydown",e=>{if(!box.classList.contains("show")||!addressAC.results.length)return;if(e.key==="ArrowDown"){e.preventDefault();addressAC.active=Math.min(addressAC.active+1,addressAC.results.length-1)}else if(e.key==="ArrowUp"){e.preventDefault();addressAC.active=Math.max(addressAC.active-1,0)}else if(e.key==="Enter"&&addressAC.active>=0){e.preventDefault();selectAddressSuggestion(addressAC.active);return}else if(e.key==="Escape"){clearAddressSuggestions();return}else return;box.querySelectorAll(".address-suggestion").forEach((x,i)=>x.classList.toggle("active",i===addressAC.active))});
+  document.addEventListener("click",e=>{if(!input.parentElement.contains(e.target))clearAddressSuggestions()})
+}
 setupAddressAutocomplete();
 
-document.querySelector("#form").onsubmit=e=>{e.preventDefault();const a=document.querySelector("#address");if(!a.dataset.selected || !/\d+/.test(a.value)){alert("Please select a complete Alberta street address from the suggestions, including the house number and street.");a.focus();return}jobs.push({id:crypto.randomUUID(),customer:customer.value.trim(),address:a.value.trim(),vehicle:vehicle.value,service:Number(service.value||15),weight:Number(weight.value||0),truckId:null,lat:a.dataset.lat?+a.dataset.lat:null,lng:a.dataset.lng?+a.dataset.lng:null});save();e.target.reset();service.value=15;render()};
+document.querySelector("#form").onsubmit=async e=>{e.preventDefault();const a=document.querySelector("#address");if(!a.dataset.selected || !/\d+/.test(a.value)){alert("Please select an Alberta address suggestion first.");a.focus();return}const submit=e.submitter;submit.disabled=true;submit.textContent="Saving…";let lat=a.dataset.lat?+a.dataset.lat:null,lng=a.dataset.lng?+a.dataset.lng:null;if(!Number.isFinite(lat)||!Number.isFinite(lng)||a.dataset.streetOnly){const p=await resolveAddressCoordinates(a.value);if(p){lat=p.lat;lng=p.lng}else if(a.dataset.streetOnly){alert("That street was found, but an exact house location was not available. Please try adding the city or postal code.");submit.disabled=false;submit.textContent="+ Save Delivery";return}}jobs.push({id:crypto.randomUUID(),customer:document.querySelector("#customer").value.trim(),address:a.value.trim(),vehicle:document.querySelector("#vehicle").value,service:Number(document.querySelector("#service").value||15),weight:Number(document.querySelector("#weight").value||0),truckId:null,lat,lng});save();e.target.reset();document.querySelector("#service").value=15;submit.disabled=false;submit.textContent="+ Save Delivery";render()};
 document.querySelector("#opt").onclick=()=>{for(const type of ["5 Ton","3 Ton","Sprinter"]){let ts=fleet.filter(t=>t.type===type),list=jobs.filter(j=>j.vehicle===type);list.forEach((j,i)=>j.truckId=ts[i%ts.length].id)}save();render()};
 document.querySelector("#export").onclick=()=>{let rows=[["ID","Customer","Address","Vehicle","Truck","Stop","ServiceMinutes","WeightTons"]];fleet.forEach(t=>jobs.filter(j=>j.truckId===t.id).forEach((j,i)=>rows.push([j.id,j.customer,j.address,j.vehicle,t.id,i+1,j.service,j.weight])));jobs.filter(j=>!j.truckId).forEach(j=>rows.push([j.id,j.customer,j.address,j.vehicle,"","",j.service,j.weight]));let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([rows.map(r=>r.map(v=>`"${String(v).replaceAll('"','""')}"`).join(",")).join("\\n")],{type:"text/csv"}));a.download="moulding-routes.csv";a.click()};
 function render(){document.querySelector("#jc").textContent=jobs.length;document.querySelector("#ac").textContent=jobs.filter(j=>j.truckId).length;let root=document.querySelector("#routes");root.innerHTML="";fleet.forEach(t=>{let stops=jobs.filter(j=>j.truckId===t.id),el=document.createElement("div");el.className="truck";el.innerHTML=`<div class="truckhead"><div><b>🚚 ${t.id}</b><div class="muted">${t.type} • ${t.capacity?t.capacity+"T capacity":"Van"} • ${stops.length} stops</div></div><button class="btn" data-share="${t.id}">Share</button></div><div class="truckbody" data-truck="${t.id}"></div>`;let body=el.querySelector(".truckbody");body.ondragover=e=>{e.preventDefault();body.classList.add("over")};body.ondragleave=()=>body.classList.remove("over");body.ondrop=e=>{e.preventDefault();body.classList.remove("over");move(e.dataTransfer.getData("job"),t.id)};if(!stops.length)body.innerHTML='<div class="empty">Drop compatible job here</div>';stops.forEach((j,i)=>{let s=document.createElement("div");s.className="stop";s.draggable=true;s.innerHTML=`<div class="num">${i+1}</div><div class="info"><b>${esc(j.customer)}</b><span>${esc(j.address)}</span></div><span class="pill">${j.vehicle}</span>`;s.ondragstart=e=>e.dataTransfer.setData("job",j.id);body.appendChild(s)});root.appendChild(el)});root.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>share(b.dataset.share));drawMap()}
