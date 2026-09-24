@@ -1,32 +1,26 @@
-# Moulding Store Online App
+# Moulding Store Route Planner
 
-This is the first live-connected version of the Moulding Store delivery-management frontend.
+Upload this entire folder to your GitHub repository.
 
-Architecture:
-- GitHub Pages: hosts the custom HTML/CSS/JavaScript.
-- Microsoft Entra ID: signs employees in.
-- Microsoft Graph: reads/writes the Excel workbook.
-- OneDrive: stores `MouldingStoreDatabase.xlsx`.
-
-## One-time workbook setup
-
-1. Make sure `MouldingStoreDatabase.xlsx` is in OneDrive -> My files (root), or change `workbookFileName` in `config.js`.
-2. Open the app while signed in as the workbook owner.
-3. Go to Settings.
-4. Click **Find My Workbook**.
-5. Copy the Drive ID and Item ID into `config.js`.
-6. Commit the updated `config.js` to GitHub.
-7. Reload the GitHub Pages site.
-8. Click **Test Excel Connection**.
-
-## Employee access
-
-Share the Excel workbook with the Microsoft 365 accounts that should use the system, with edit permission as appropriate.
-Do not use an anonymous public "Anyone with the link can edit" share link.
-
-The app uses the configured Drive ID + Item ID and the signed-in employee's delegated Microsoft Graph permission to access the same workbook.
+## Included
+- React-style single-page architecture without a build step (plain JS module)
+- Premium responsive mobile UI
+- 4 x 5-ton, 2 x 3-ton, 2 x Sprinter
+- Add delivery and choose vehicle requirement
+- Drag/drop jobs between compatible trucks
+- Colored route map and numbered stops
+- Google Maps share link
+- CSV export
+- PWA install/offline shell
+- Excel Office Script to create the Lists/sheet structure
 
 ## Important
+The browser prototype uses localStorage so it runs immediately. Your existing sheet/list should be connected by replacing the load/save functions with your existing API/connector.
 
-Do not add client secrets, passwords, or API secrets to this repository.
-The Client ID and Tenant ID are public application configuration identifiers.
+Do not put private API keys in GitHub.
+
+## GitHub Pages
+Repository -> Settings -> Pages -> Deploy from branch -> main -> /(root).
+
+## Production next step
+Connect the exact spreadsheet/list you already have. Then replace localStorage with that API and add a secure backend for traffic-aware routing/optimization.
