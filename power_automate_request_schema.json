@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "payloadJson": { "type": "string" }
+  },
+  "required": ["payloadJson"]
+}
