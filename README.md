@@ -25,5 +25,6 @@ Repository -> Settings -> Pages -> Deploy from branch -> main -> /(root).
 ## Production next step
 Connect the exact spreadsheet/list you already have. Then replace localStorage with that API and add a secure backend for traffic-aware routing/optimization.
 
-### Alberta-only address autocomplete
-The delivery address field now returns only Alberta, Canada results using an Alberta geographic bounding box plus a final province/country filter. Selected results retain latitude/longitude for routing.
+
+### Address autocomplete
+The address field now requires a house/building number and street and returns Alberta-only premise-level results. The fallback uses Nominatim's `address` layer and rejects city/street-only results. For Canada Post AddressComplete-quality coverage, set `addressProvider` to `canadapost` and add an AddressComplete API key restricted to your GitHub Pages domain. Canada Post's Find/Retrieve API is designed for address autocomplete and returns fields such as BuildingNumber, Street, City, Province and PostalCode.
