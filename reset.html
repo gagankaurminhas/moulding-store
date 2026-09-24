@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moulding Store — Refreshing App</title>
+<style>
+html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f4f1ea;color:#24221e}body{display:grid;place-items:center}.box{width:min(430px,calc(100% - 40px));padding:28px;background:#fffdf9;border:1px solid #e4ded2;border-radius:18px;box-shadow:0 18px 50px rgba(42,35,24,.12);text-align:center}.mark{width:44px;height:44px;border-radius:12px;background:#fbf3df;border:1px solid #ead9b5;margin:0 auto 14px;display:grid;place-items:center;color:#9a702b;font-weight:800}.spin{display:inline-block;width:16px;height:16px;border:2px solid #e2d6bf;border-top-color:#b58a3a;border-radius:50%;animation:r .7s linear infinite;vertical-align:-3px;margin-right:7px}@keyframes r{to{transform:rotate(360deg)}}p{color:#77736b;font-size:13px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="box"><div class="mark">MS</div><h2>Refreshing Moulding Store</h2><p><span class="spin"></span>Clearing the old app cache. Your saved deliveries are kept.</p></div>
+<script>
+(async()=>{
+  try{
+    const regs=await navigator.serviceWorker?.getRegistrations?.()||[];
+    await Promise.all(regs.map(r=>r.unregister().catch(()=>false)));
+    const keys=await caches.keys();
+    await Promise.all(keys.map(k=>caches.delete(k)));
+  }catch(e){}
+  setTimeout(()=>location.replace('./'),900);
+})();
+</script>
+</body>
+</html>

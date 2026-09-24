@@ -1,20 +1,28 @@
-# Moulding Store Route Planner — Alberta No-API Address Search
+# Moulding Store — Leaflet / OpenStreetMap / Alberta / No API
 
-This GitHub-ready build uses **Leaflet + OpenStreetMap tiles** for the map and **Photon (OpenStreetMap data)** for search-as-you-type address autocomplete. No API key is required.
+## Current build
+- Leaflet map with OpenStreetMap tiles
+- Photon/OpenStreetMap address autocomplete
+- Alberta-only validation
+- No paid geocoding API key
+- Compact ultra-luxury light interface
+- Alberta address suggestions show readable primary + secondary text
+- 8-vehicle fleet, drag/drop compatible jobs, route lines, Google Maps sharing, CSV export
 
-## Address search
-- Canada-only request filtering.
-- Alberta bounding box: `-120.0,48.9,-110.0,60.0`.
-- Client-side validation requires the returned country to be Canada and province/state to be Alberta.
-- House-level results are preferred.
-- Photon structured search is used as a fallback for `house number + street + city` input.
-- City-only and street-only results are not accepted as a delivery address.
-- Selecting an address stores its latitude/longitude for the map and routing.
+## IMPORTANT: one-time cache reset
+The previous version used a PWA service worker that could cache the old black interface. After replacing your GitHub repository with this version, open:
 
-## Important
-Photon is a public OSM-based demo service. Its project says the public demo server can be used for projects when requests remain reasonable. For a production fleet with substantial usage, self-hosting Photon or using a dedicated OSM-derived geocoder is recommended.
+`https://YOUR-GITHUB-PAGES-URL/reset.html`
 
-OpenStreetMap tiles are used with visible attribution. The OSM tile service is best-effort and has usage requirements; do not bulk-download tiles.
+Wait for it to redirect to the app. This unregisters the old service worker and clears only browser caches. **It does not delete your saved deliveries from localStorage.**
+
+After that, the new light version will register its new service worker.
 
 ## GitHub Pages
-Upload the contents of this folder to your repository and enable GitHub Pages. No build step is required.
+Upload all files and folders in this ZIP to the repository root. Keep `assets/icon.svg` inside the `assets` folder.
+
+## Address search
+Start with a house number and street, for example:
+`123 17 Ave SW`
+
+Results are filtered to Alberta, Canada and selected addresses store latitude/longitude for mapping.

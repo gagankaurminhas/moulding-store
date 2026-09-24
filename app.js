@@ -49,7 +49,7 @@ async function photonSearch(q,extra={},endpoint=CONFIG.geocoder){
   const data=await r.json();return Array.isArray(data.features)?data.features:[];
 }
 function filterAlberta(features){return features.filter(f=>isAlberta(f.properties||{}));}
-function hasHouse(p){return /^\\d/.test(String(p.housenumber||'').trim());}
+function hasHouse(p){return /^\d/.test(String(p.housenumber||'').trim());}
 async function fetchAlbertaAddresses(q){
   if(!/\\d/.test(q)) return {results:[],message:"Start with the house number, then the street name."};
   const normalized=q.replace(/\\s+/g," ").trim();
